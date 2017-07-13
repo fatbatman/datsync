@@ -28,5 +28,5 @@
   ::send-event!
   (fn [app db [event-id server-event]]
     (log/info "send-event! called")
-    (send-event! (:remote app) server-event)))
+    (send-event! (:remote app) (vec (take 2 server-event)))))
 
