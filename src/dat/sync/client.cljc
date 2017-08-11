@@ -304,11 +304,24 @@
 ;; based approach. Will need to seriously rewrite and rethink this whole section. I think it's going to put a lot more of
 ;; the onux on tracking the
 
+(defn get-existing-ref-attrs [db]
+  (let[types (d/q '[:find ?i ?n :in $ :where [?t :db/valueType ?n] [?t :db/ident ?i]] db)
+       datom-to-id (zipmap (map first types) (map second types))
+       datom-types (map (fn[kv] (d/pull db '[:db/ident] (second kv))) datom-to-id)]
+    (set
+      (remove #(= 0 (.indexOf (namespace %) "db"))     ;;remove the standard DB stuff
+        (keys
+          (filter #(= (second %) :db.type/ref)
+            (zipmap (keys datom-to-id) (map :db/ident datom-types))))))
+
+    ))
+
 (defn get-ref-attrs-for-mapping
   "Returns all reference attribute idents that exist in database ..."
   [db tx]
   ;; The valueType is a ref type; so it's pointing to an entity with :db/ident :db.type/ref
-  (let [db-ref-type-remote-eid (or ;; XXX Uhh... shouldn't there be something else in this or?
+  (let [;;_ (println "get-ref-attrs-for-mapping-new " (get-ref-attrs-for-mapping2 db tx))
+        db-ref-type-remote-eid (or ;; XXX Uhh... shouldn't there be something else in this or?
                                    ;; Specifically we should have here something that gets the...
                                    ;; Wait... maybe we don't need this in the identities version because we'll only have
                                    ;; eids on first payload (bootstrap). Everything else will resolve with lookups...
@@ -329,6 +342,7 @@
       ;; There is an assumption here that references attributes must be specified as complete transactions,
       ;; and can't be build up in separate transactions... So no changing to/from ref types XXX
       (concat
+        (get-existing-ref-attrs db)    ;;This probably duplicates much of what is done below
         ;; Anything that looks like a reference attribute in the existing db
         ;; TODO Should get this from the (:schema db) instead, since this is more general, and doesn't force persisting of schema;
         ;; Though maybe this is necessary elsewhere? Need to at least consider doing this...
@@ -391,9 +405,13 @@
   by looking for a match to an existing :dat.sync.remote.db/id. If it doesn't find one, it matches it with a negative one
   and adds an [:db/add eid :dat.sync.remote.db/id _] statement to the tx."
   [db tx]
-  (log/debug "Calling translate-eids")
+  (log/info "Calling translate-eids")
   (let [eid-mapping (make-eid-mapping db tx)
-        ref-attribute-idents (get-ref-attrs-for-mapping db tx)]
+        ref-attribute-idents (get-ref-attrs-for-mapping db tx)
+        ;_ (println "eid-mapping " eid-mapping)
+        ;_ (println "ref-attribute-idents " ref-attribute-idents)
+        ;_ (println "get-ref-attrs-for-mapping2 " (get-existing-ref-attrs db))
+        ]
     (vec (concat
            ;; First map over all the tx-forms and modify any eids
            (mapv
@@ -519,7 +537,7 @@
                               (attr-type-ident ?attr-ident :db.type/ref)]
                              [(remote-value-trans ?ds-v ?attr-ident ?remote-v)
                               (is-ref ?attr-ident)
-                              (> ?ds-v 0)
+                              ;;#JA# to fix remote references not being  (> ?ds-v 0)
                               [?ds-v :dat.sync.remote.db/id ?remote-v]]
                              [(remote-value-trans ?ds-v ?attr-ident ?remote-v)
                               (is-ref ?attr-ident)
@@ -528,10 +546,21 @@
                              ;; Shit... really want to be able to use (not ...) here...
                              [(remote-value-trans ?ds-v ?atrr-ident ?remote-v)
                               (attr-type-ident ?attr-ident ?vt-ident)
-                              (not= ?vt-ident :db.type/ref)
+                              ;#1 (not= ?vt-ident :db.type/ref)
                               [(ground ?ds-v) ?remote-v]]]
-                           db tx)]
-    (vec translated-tx)))
+
+                           db tx)
+
+        translated-tx2 (if (= (count translated-tx) 2)
+            [(vec (first translated-tx))]
+            (vec translated-tx))
+        ]
+    (println "tx " tx)
+    (println "translated-tx2 " translated-tx2)
+    ;;(vec translated-tx)
+    ;;#JA# because the fix above results in duplicates
+    translated-tx2
+    ))
 
 
 (defn ^:deprecated datomic-tx
@@ -708,6 +737,8 @@
     (log/info "Running remote-tx in :dat.sync/recv-remote-tx.")
     (let [normalized-tx (normalize-tx tx-data)
           translated-tx (translate-eids db normalized-tx)
+          _ (println "#normalized-tx# " normalized-tx)
+          _ (println "#translated-tx# " translated-tx)
           schema-changes (tx-schema-changes db translated-tx)
           remote-tx-meta {:dat.sync.prov/agent :dat.sync/remote}]
       (reactor/resolve-to app db

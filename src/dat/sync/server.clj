@@ -24,6 +24,11 @@
   [db tempid-map [op e]]
   [op (tempid-map e)])
 
+;;TODO - This registration of this needs to be automated
+(defmethod translate-tx-form :raffle/buy-ticket
+  [db tempid-map [op raf-eid device-id purchase-data]]
+  [op (tempid-map raf-eid) (tempid-map device-id) purchase-data])
+
 ;; Should build a transaction function to do this thing but make it optional (performance concerns; don't want
 ;; to have to restrict all to go through transaction; should do reactions or something here to acheive an
 ;; alternate approach to consistency?)
@@ -73,7 +78,8 @@
   [db-conn tx]
   ;; This is where we'd want to put security measures in place;
   ;; What other translation things do we need to do here?
-  (let [db (d/db db-conn)
+  (let [_ (println "apply-remote-tx! " tx)
+        db (d/db db-conn)
         tx' (mapv (partial translate-tx-form db tempid-map) tx)]
     (d/transact db-conn tx')))
 

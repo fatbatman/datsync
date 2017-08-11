@@ -1,4 +1,8 @@
 
+
+## Includes some quick and dirty fixes for my requirements.  Use with caution #
+
+
 ![Datsync](datsync.jpg)
 
 Datomic &lt;-> DataScript syncing/replication utilities
