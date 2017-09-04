@@ -516,50 +516,57 @@
 ;; TODO This should probably probably either be deprecated or rewritten to use our globalize fn
 
 (defn remote-tx
-  [db tx]
-  (let [tx (->> (normalize-tx tx)
-                (remove
-                  (fn [[_ _ a]]
-                    ;; This is something that should never exist on the server
-                    (#{:dat.sync.remote.db/id :db/id} a))))
-        translated-tx (d/q '[:find ?op ?dat-e ?a ?dat-v
-                             :in % $ [[?op ?e ?a ?v]]
-                             :where [(get-else $ ?e :dat.sync.remote.db/id ?e) ?dat-e]
-                             (remote-value-trans ?v ?a ?dat-v)]
-                           ;; Really want to be able to do an or clause here to get either the value back
-                           ;; unchanged, or the reference :dat.sync.remote.db/id if a ref attribute
-                           ;; Instead I'll use rules...
-                           '[[(attr-type-ident ?attr-ident ?type-ident)
-                              [?attr :db/ident ?attr-ident]
-                              [?attr :db/valueType ?vt]
-                              [?vt :db/ident ?type-ident]]
-                             [(is-ref ?attr-ident)
-                              (attr-type-ident ?attr-ident :db.type/ref)]
-                             [(remote-value-trans ?ds-v ?attr-ident ?remote-v)
-                              (is-ref ?attr-ident)
-                              ;;#JA# to fix remote references not being  (> ?ds-v 0)
-                              [?ds-v :dat.sync.remote.db/id ?remote-v]]
-                             [(remote-value-trans ?ds-v ?attr-ident ?remote-v)
-                              (is-ref ?attr-ident)
-                              (< ?ds-v 0)
-                              [(ground ?ds-v) ?remote-v]]
-                             ;; Shit... really want to be able to use (not ...) here...
-                             [(remote-value-trans ?ds-v ?atrr-ident ?remote-v)
-                              (attr-type-ident ?attr-ident ?vt-ident)
-                              ;#1 (not= ?vt-ident :db.type/ref)
-                              [(ground ?ds-v) ?remote-v]]]
+  [db txs]
+  (let [txs (->> (normalize-tx txs)
+                 (remove
+                   (fn [[_ _ a]]
+                     ;; This is something that should never exist on the server
+                     (#{:dat.sync.remote.db/id :db/id} a))))
 
-                           db tx)
+        ;;NOT NICE BUT THE QUERY BELOW RESULTS TWO RESUTS FOR REFERENCES WITH THE SECOND ONE IS THE LOCAL ID WHICH BREAK THINGS, SO WE JUST WANT THE FIRST
+        ;;IT WAS QUICKER TO DO THIS THAN UNDERSTAND HOW TO FIX THE LAST remote-value-trans below
+        translated-tx3 (map
+                         (fn[tx]
+                           (first (d/q '[:find ?op ?dat-e ?a ?dat-v
+                                         :in % $ [?op ?e ?a ?v]
+                                         :where [(get-else $ ?e :dat.sync.remote.db/id ?e) ?dat-e]
+                                         (remote-value-trans ?v ?a ?dat-v)]
 
-        translated-tx2 (if (= (count translated-tx) 2)
-            [(vec (first translated-tx))]
-            (vec translated-tx))
+                                       ;; Really want to be able to do an or clause here to get either the value back
+                                       ;; unchanged, or the reference :dat.sync.remote.db/id if a ref attribute
+                                       ;; Instead I'll use rules...
+                                       '[[(attr-type-ident ?attr-ident ?type-ident)
+                                          [?attr :db/ident ?attr-ident]
+                                          [?attr :db/valueType ?vt]
+                                          [?vt :db/ident ?type-ident]]
+
+                                         [(is-ref ?attr-ident)
+                                          (attr-type-ident ?attr-ident :db.type/ref)]
+
+                                         [(remote-value-trans ?ds-v ?attr-ident ?remote-v)
+                                          (is-ref ?attr-ident)
+                                          ;;#JA# to fix remote references not being  (> ?ds-v 0)
+                                          [?ds-v :dat.sync.remote.db/id ?remote-v]]
+
+                                         ;;---------------------------
+                                         [(remote-value-trans ?ds-v ?attr-ident ?remote-v)
+                                          (is-ref ?attr-ident)
+                                          (< ?ds-v 0)
+                                          [(ground ?ds-v) ?remote-v]]
+
+                                         [(remote-value-trans ?ds-v ?atrr-ident ?remote-v)
+                                          (attr-type-ident ?attr-ident ?vt-ident)
+                                          ;#1 (not= ?vt-ident :db.type/ref)
+                                          [(ground ?ds-v) ?remote-v]]
+                                         ]
+                                       db tx)))
+                         txs)
         ]
-    (println "tx " tx)
-    (println "translated-tx2 " translated-tx2)
+    (println "txs " txs)
+    (println "translated-tx3 " translated-tx3)
     ;;(vec translated-tx)
     ;;#JA# because the fix above results in duplicates
-    translated-tx2
+    translated-tx3
     ))
 
 
